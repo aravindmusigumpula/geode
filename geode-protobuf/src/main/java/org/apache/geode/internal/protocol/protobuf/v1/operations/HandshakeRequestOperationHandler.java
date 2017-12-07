@@ -29,31 +29,32 @@ import org.apache.geode.internal.protocol.protobuf.v1.utilities.ProtobufResponse
 import org.apache.geode.internal.protocol.serialization.SerializationService;
 import org.apache.geode.internal.protocol.state.ConnectionHandshakingStateProcessor;
 import org.apache.geode.internal.protocol.state.ConnectionStateProcessor;
+import org.apache.geode.internal.protocol.state.ConnectionTerminatingStateProcessor;
 import org.apache.geode.internal.protocol.state.exception.ConnectionStateException;
 
 public class HandshakeRequestOperationHandler implements
     OperationHandler<ConnectionAPI.HandshakeRequest, ConnectionAPI.HandshakeResponse, ClientProtocol.ErrorResponse> {
   private static final Logger logger = LogManager.getLogger();
+  private final VersionValidator validator = new VersionValidator();
 
   @Override
   public Result<ConnectionAPI.HandshakeResponse, ClientProtocol.ErrorResponse> process(
       SerializationService serializationService, ConnectionAPI.HandshakeRequest request,
-      MessageExecutionContext messageExecutionContext) throws InvalidExecutionContextException {
+      MessageExecutionContext messageExecutionContext)
+      throws InvalidExecutionContextException, ConnectionStateException {
     ConnectionHandshakingStateProcessor stateProcessor;
 
-    try {
-      stateProcessor = messageExecutionContext.getConnectionStateProcessor().allowHandshake();
-    } catch (ConnectionStateException e) {
-      return Failure.of(ProtobufResponseUtilities.makeErrorResponse(e));
-    }
+    // If handshake not allowed by this state this will throw a ConnectionStateException
+    stateProcessor = messageExecutionContext.getConnectionStateProcessor().allowHandshake();
 
-    boolean handshakeSucceeded = false;
-    // Require an exact match with our version of the protobuf code for this implementation
-    if (request.getMajorVersion() == ConnectionAPI.MajorVersions.CURRENT_MAJOR_VERSION_VALUE
-        && request.getMinorVersion() == ConnectionAPI.MinorVersions.CURRENT_MINOR_VERSION_VALUE) {
-      handshakeSucceeded = true;
+    final boolean handshakeSucceeded =
+        validator.isValid(request.getMajorVersion(), request.getMinorVersion());
+    if (handshakeSucceeded) {
       ConnectionStateProcessor nextStateProcessor = stateProcessor.handshakeSucceeded();
       messageExecutionContext.setConnectionStateProcessor(nextStateProcessor);
+    } else {
+      messageExecutionContext
+          .setConnectionStateProcessor(new ConnectionTerminatingStateProcessor());
     }
 
     return Success.of(ConnectionAPI.HandshakeResponse.newBuilder()

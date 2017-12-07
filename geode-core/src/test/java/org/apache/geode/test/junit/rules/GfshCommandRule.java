@@ -29,6 +29,7 @@ import org.junit.runner.Description;
 
 import org.apache.geode.management.cli.Result;
 import org.apache.geode.management.internal.cli.HeadlessGfsh;
+import org.apache.geode.management.internal.cli.LogWrapper;
 import org.apache.geode.management.internal.cli.i18n.CliStrings;
 import org.apache.geode.management.internal.cli.result.CommandResult;
 import org.apache.geode.management.internal.cli.shell.Gfsh;
@@ -73,10 +74,12 @@ public class GfshCommandRule extends DescribedExternalResource {
   private Supplier<Integer> portSupplier;
   private PortType portType = PortType.jmxManager;
   private HeadlessGfsh gfsh = null;
+  private int gfshTimeout = 2;
   private boolean connected = false;
   private IgnoredException ignoredException;
   private TemporaryFolder temporaryFolder = new TemporaryFolder();
   private File workingDir;
+  private CommandResult commandResult;
 
   public GfshCommandRule() {
     try {
@@ -94,8 +97,9 @@ public class GfshCommandRule extends DescribedExternalResource {
 
   @Override
   protected void before(Description description) throws Throwable {
+    LogWrapper.close();
     workingDir = temporaryFolder.newFolder("gfsh_files");
-    this.gfsh = new HeadlessGfsh(getClass().getName(), 30, workingDir.getAbsolutePath());
+    this.gfsh = new HeadlessGfsh(getClass().getName(), gfshTimeout, workingDir.getAbsolutePath());
     ignoredException =
         addIgnoredException("java.rmi.NoSuchObjectException: no such object in table");
 
@@ -206,6 +210,7 @@ public class GfshCommandRule extends DescribedExternalResource {
     }
     gfsh.executeCommand("exit");
     gfsh.terminate();
+    LogWrapper.close();
     gfsh = null;
   }
 
@@ -215,7 +220,7 @@ public class GfshCommandRule extends DescribedExternalResource {
 
   public CommandResult executeCommand(String command) {
     gfsh.executeCommand(command);
-    CommandResult result = null;
+    CommandResult result;
     try {
       result = (CommandResult) gfsh.getResult();
     } catch (InterruptedException e) {
@@ -235,11 +240,12 @@ public class GfshCommandRule extends DescribedExternalResource {
       }
     }
     System.out.println("Command result for <" + command + ">: \n" + gfsh.outputString);
+    commandResult = result;
     return result;
   }
 
   public CommandResultAssert executeAndAssertThat(String command) {
-    CommandResult commandResult = executeCommand(command);
+    commandResult = executeCommand(command);
     return new CommandResultAssert(gfsh.outputString, commandResult);
   }
 
@@ -262,7 +268,16 @@ public class GfshCommandRule extends DescribedExternalResource {
     return workingDir;
   }
 
+  public GfshCommandRule withTimeout(int timeoutInSeconds) {
+    this.gfshTimeout = timeoutInSeconds;
+    return this;
+  }
+
   public enum PortType {
     locator, jmxManager, http
+  }
+
+  public CommandResult getCommandResult() {
+    return commandResult;
   }
 }
